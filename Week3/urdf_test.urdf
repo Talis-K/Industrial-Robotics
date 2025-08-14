@@ -1,0 +1,30 @@
+<!-- A URDF file is written in XML and defines your robot in terms of links and joints. 
+In our example, we use only simple geometric primitives—boxes and cylinders—to represent the robot’s shape. 
+This keeps the model easy to write and visualise without needing any external mesh files. -->
+
+<robot name = 'BettyTheBOT'>
+    <link name = 'base_link'>
+        <visual>
+        <origin xyz = '0 0 0.05'/>
+        <geometry>
+            <box size = '0.3 0.2 0.02'/>
+        </geometry>
+        <material name = 'red'><colour rgba = '1 0 0 1'/></material>
+    <visual>
+</link>
+
+    <link name = 'arm_link'>
+        <visual>
+        <origin xyz = '0 0.1 0.05'/>
+        <geometry>
+            <cylinder radius = '0.02' length = '0.2'/>
+        </geometry>
+        <material name = 'blue'><colour rgba = '0 0 1 1'/></material>
+    </visual>
+    </link>
+
+    <joint name = 'base_to_arm' type = 'fixed'>
+        <parent link = 'base_link'/>
+        <child link = 'arm_link'/>
+        <origin xyz = '0 0.1 0.05'/>
+    </joint>
