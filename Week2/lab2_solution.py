@@ -253,14 +253,14 @@ class Lab2Solution:
         plt.close()
 
         # 4.1 and 4.2: Define the DH Parameters to create the Kinematic model
-        link1 = DHLink(d= 0.5, a= 0.3, alpha= np.deg2rad(90), qlim= [-pi, pi]) 
-        link2 = DHLink(d= 0, a= 1, alpha= 0, qlim= [-pi, pi]) 
-        link3 = DHLink(d= 0, a= 0.2, alpha= -np.deg2rad(90), qlim= [-pi, pi]) 
-        link4 = DHLink(d= 0.7, a= 0, alpha= np.deg2rad(90), qlim= [-pi, pi])
+        link1 = DHLink(d= 1, a= 0, alpha= np.deg2rad(90), qlim= [-pi, pi]) 
+        link2 = DHLink(d= 0, a= 1, alpha= -np.deg2rad(90), qlim= [-pi, pi]) 
+        link3 = DHLink(d= 1, a= 0.2, alpha= 0, qlim= [-pi, pi]) 
+        link4 = DHLink(d= 1, a= 0, alpha= np.deg2rad(90), qlim= [-pi, pi])
         robot = DHRobot([link1, link2, link3, link4], name= 'myRobot')
         workspace = [-3, 3, -3, 3, -3, 3]
         # q =  np.zeros([1,4]) # Initial joint angles = 0
-        q = np.array([-0.7506, 0.5895, -1.8286,  2.5971])  # Initial joint angles as shown in Canvas
+        q = np.array([2.6971, -0.9426, -1.9063, -1.5640])  # Initial joint angles as shown in Canvas
 
         try:
             options = {"eelength": 1.0, "jointaxislength": 0.5}

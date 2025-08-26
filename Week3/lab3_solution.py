@@ -277,56 +277,79 @@ class Lab3Solution:
             env.add(intersection_marker)
 
         # 3.7) Repeat the above process while randomly varying the wrist joints 4-to-6 with joints 1-to-3 fixed at [0, π/2, 0] so that the robot consistently faces the wall. 
-        qlim = denso_robot.qlim.T  # To make the shape (6, 2)                
-        print("Grit-blasting robot running...\nTry press 'e' to terminate.")
-        for _ in range(100):   
-            if keyboard.is_pressed("e"):
-                break
+        # qlim = denso_robot.qlim.T  # To make the shape (6, 2)                
+        # print("Grit-blasting robot running...\nTry press 'e' to terminate.")
+        # for _ in range(100):   
+        #     if keyboard.is_pressed("e"):
+        #         break
 
-            # 3.7.1) Ensure that your random joint values stay within the joint limits.
-            random_component = 0.1 * (np.random.rand(3) - 0.5) * (qlim[3:, 1] - qlim[3:, 0])
-            goal_q = np.concatenate(([0, np.pi/2, 0], random_component))
+        #     # 3.7.1) Ensure that your random joint values stay within the joint limits.
+        #     random_component = 0.1 * (np.random.rand(3) - 0.5) * (qlim[3:, 1] - qlim[3:, 0])
+        #     goal_q = np.concatenate(([0, np.pi/2, 0], random_component))
 
-            # 3.7.2) As an extension, you may choose to use jtraj to move to each random goal state smoothly
-            joint_trajectory = jtraj(denso_robot.q, goal_q, 10).q
+        #     # 3.7.2) As an extension, you may choose to use jtraj to move to each random goal state smoothly
+        #     joint_trajectory = jtraj(denso_robot.q, goal_q, 10).q
 
-            for q in joint_trajectory:
-                denso_robot.q = q
-                blast_start_tr = denso_robot.fkine(q)
-                blast_start_point = blast_start_tr.t
-                blast_end_point = (blast_start_tr @ SE3.Trans(0, 0, 1)).t
+        #     for q in joint_trajectory:
+        #         denso_robot.q = q
+        #         blast_start_tr = denso_robot.fkine(q)
+        #         blast_start_point = blast_start_tr.t
+        #         blast_end_point = (blast_start_tr @ SE3.Trans(0, 0, 1)).t
 
-                # Check intersection with wall
-                intersection_point, check = line_plane_intersection(
-                    plane_normal, point_on_plane, blast_start_point, blast_end_point
-                )
+        #         # Check intersection with wall
+        #         intersection_point, check = line_plane_intersection(
+        #             plane_normal, point_on_plane, blast_start_point, blast_end_point
+        #         )
 
-                if check == 1:
-                    # Bound check
-                    min_bounds = np.array([plane_bounds[i] for i in [0, 2, 4]])
-                    max_bounds = np.array([plane_bounds[i] for i in [1, 3, 5]])
-                    in_bounds = np.all(min_bounds < intersection_point) and np.all(intersection_point < max_bounds)
+        #         if check == 1:
+        #             # Bound check
+        #             min_bounds = np.array([plane_bounds[i] for i in [0, 2, 4]])
+        #             max_bounds = np.array([plane_bounds[i] for i in [1, 3, 5]])
+        #             in_bounds = np.all(min_bounds < intersection_point) and np.all(intersection_point < max_bounds)
 
-                    if in_bounds:
-                        blast_end_point = intersection_point
+        #             if in_bounds:
+        #                 blast_end_point = intersection_point
 
-                        intersection_marker = Sphere(radius=0.05, pose=SE3(intersection_point), color="green")
-                        env.add(intersection_marker)
+        #                 intersection_marker = Sphere(radius=0.05, pose=SE3(intersection_point), color="green")
+        #                 env.add(intersection_marker)
 
-                # # Draw or update the cylinder
-                if blast_cylinder:
-                    blast_cylinder.T = blast_start_tr * SE3(0,0,0.5)
+        #         # # Draw or update the cylinder
+        #         if blast_cylinder:
+        #             blast_cylinder.T = blast_start_tr * SE3(0,0,0.5)
 
-                env.step(0.02)  # 50Hz refresh
+        #         env.step(0.02)  # 50Hz refresh
 
-        input("Question finished. Press Enter to continue.\n")   
-        return     
+        # 3.x) Define initial and final joint states for quintic polynomial velocity profile
+        q1 = [0, -0.6981, 0, 0.3491, 0.5236, 0.1745]
+        q2 = [-0.2618, -0.6981, -1.571, 0.5236, 0, -0.3491]
+
+       # 3.x) Generate quintic polynomial trajectory with 25 steps
+        trajectory = jtraj(q1, q2, 25)
+
+        # 3.x) Initialize list to store distances
+        distances = []
+
+        # 3.x) Compute distance for each point in the trajectory
+        for q in trajectory.q:
+            denso_robot.q = q
+            end_effector_transform = denso_robot.fkine(denso_robot.q)
+            # Extend the laser pointer 12m along the end effector's Z-axis
+            laser_end_point = (end_effector_transform @ SE3(0, 0, 12)).t
+            distance = np.linalg.norm(laser_end_point)
+            distances.append(distance)
+
+        # 3.x) Find the largest distance and print result in meters to 4 decimal places
+        max_distance = max(distances)
+        print(f"Maximum distance between robot base and laser end: {max_distance:.4f} meters")  
+
+        # input("Question finished. Press Enter to continue.\n")   
+        return  
 
 # ---------------------------------------------------------------------------------------#
 if __name__ == "__main__":
     lab = Lab3Solution()
-    lab.question1()
-    lab.question2()
+    # lab.question1()
+    # lab.question2()
     lab.question3()
     print("Lab 3 Solution completed. You can now close the window.")
 
