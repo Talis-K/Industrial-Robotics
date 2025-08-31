@@ -1,3 +1,5 @@
+#edit brcik ;position to match gripper
+
 import spatialgeometry as geometry
 import numpy as np
 import swift
@@ -43,7 +45,7 @@ class Gripper:
         T_ee = self.robot.fkine(self.robot.q)
 
         # Rotate gripper 180° about X so fingers point downward
-        T_offset = SE3.Rx(pi) * SE3(self.ee_to_finger_tip, 0, -0.02)
+        T_offset = SE3.Rx(pi) * SE3(self.ee_to_finger_tip/2, 0, 0)
 
         half_gap = self.opening / 2
         T_fL = T_ee * T_offset * SE3(0,  half_gap + 0.5 * self.finger_w, 0)
@@ -77,7 +79,7 @@ class EnvironmentBuilder:
         self.robot = UR3()
         self.robot.q = np.zeros(6)
         self.robot.base = SE3(0, 0, 0)
-        UR3.links[1].qlim = np.deg2rad([-90,  90])
+        # UR3.links[1].qlim = np.deg2rad([-90,  90])
         #print q lim of each joint
             # Print joint limits for each joint
         for i in range(self.robot.n):
@@ -98,8 +100,9 @@ class EnvironmentBuilder:
         self.env.add(Cuboid(scale=[3, 3, 0.01], pose=SE3(), color=[0.8, 0.8, 0.5, 1]))
 
     def add_rail(self):
-        self.env.add(Cuboid(scale=[0.2, 3.2, 0.05], pose=SE3(0.0, 0.0, 0.025), color=[0.3, 0.3, 0.35, 1]))
-        self.rail_carriage = Cuboid(scale=[0.25, 0.25, 0.08], pose=SE3(0.0, 0.0, 0.09), color=[0.4, 0.4, 0.7, 1])
+        self.env.add(Cuboid(scale=[0.05, 3, 0.05], pose=SE3(0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
+        self.env.add(Cuboid(scale=[0.05, 3, 0.05], pose=SE3(-0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
+        self.rail_carriage = Cuboid(scale=[0.15, 0.25, 0.05], pose=SE3(0.0, 0.0, 0.025), color=[1, 0.4, 0.7, 1])
         self.env.add(self.rail_carriage)
 
     def load_bricks(self):
@@ -139,7 +142,7 @@ class Controller:
         for s in np.linspace(0, 1, steps):
             y = (1 - s) * start_y + s * target_y
             self.robot.base = SE3(0, y, 0)
-            self.rail_carriage.T = SE3(0, y, 0.09)
+            self.rail_carriage.T = SE3(0, y, 0.025)
             self.gripper.update_with_payload(self.bricks)
             self.env.step(0.02)
             time.sleep(0.02)
