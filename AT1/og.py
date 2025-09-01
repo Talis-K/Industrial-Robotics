@@ -94,7 +94,7 @@ class LabAT1():
 
             # Confirm joint angles are within limits and generate trajectory
             q2_joint_limits = self.check_joint_limits(q_brick, self.robot)  # check if joint angles are within limits
-            q_matrix = rtb.jtraj(q_robot, q_brick, steps).q  # generate a smooth joint trajectory
+            q_matrix = rtb.jtraj(self.robot.q, q_brick, steps).q  # generate a smooth joint trajectory
 
             # Animate
             for q in q_matrix:  # for each set of joint angles in the trajectory

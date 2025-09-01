@@ -17,18 +17,18 @@ class Gripper:
     def __init__(self, env, robot):
         self.env = env
         self.robot = robot
-        self.finger_len = 0.08
+        self.finger_len = 0.02
         self.finger_w = 0.01
-        self.finger_t = 0.01
+        self.finger_t = 0.08
         self.ee_to_finger_tip = 0.07
         self.opening = 0.06
         self.carrying_idx = None
 
         # Create finger geometry
         self.finger_L = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t],
-                               pose=SE3(), color=[0.2, 0.2, 0.2, 1])
+                               pose=SE3() * SE3.Rz(pi/2), color=[0.2, 0.2, 0.2, 1])
         self.finger_R = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t],
-                               pose=SE3(), color=[0.2, 0.2, 0.2, 1])
+                               pose=SE3() * SE3.Rz(pi/2), color=[0.2, 0.2, 0.2, 1])
         env.add(self.finger_L)
         env.add(self.finger_R)
 
@@ -79,9 +79,7 @@ class EnvironmentBuilder:
         self.robot = UR3()
         self.robot.q = np.zeros(6)
         self.robot.base = SE3(0, 0, 0)
-        # UR3.links[1].qlim = np.deg2rad([-90,  90])
-        #print q lim of each joint
-            # Print joint limits for each joint
+        self.robot.links[1].qlim = np.deg2rad([-180, 0])  # Set joint limits for the second link
         for i in range(self.robot.n):
             print(f"Joint {i} limits: lower = {np.rad2deg(self.robot.qlim[0, i]):.2f}°, upper = {np.rad2deg(self.robot.qlim[1, i]):.2f}°")
         self.robot.add_to_env(self.env)
@@ -97,7 +95,7 @@ class EnvironmentBuilder:
         self.env.add(Cuboid(scale=[3, 0.05, 0.8], pose=SE3(0, -1.5, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3( 1.5, 0, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3(-1.5, 0, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
-        self.env.add(Cuboid(scale=[3, 3, 0.01], pose=SE3(), color=[0.8, 0.8, 0.5, 1]))
+        # self.env.add(Cuboid(scale=[3, 3, 0.01], pose=SE3(), color=[0.8, 0.8, 0.5, 1]))
 
     def add_rail(self):
         self.env.add(Cuboid(scale=[0.05, 3, 0.05], pose=SE3(0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
@@ -145,7 +143,7 @@ class Controller:
             self.rail_carriage.T = SE3(0, y, 0.025)
             self.gripper.update_with_payload(self.bricks)
             self.env.step(0.02)
-            time.sleep(0.02)
+            time.sleep(0.03)
 
     def pick_and_place(self):
         for i, brick in enumerate(self.bricks):
@@ -156,13 +154,18 @@ class Controller:
             self.move_carriage_to_y(brick_pose.t[1])
 
             # 2) Approach hover
-            T_hover = SE3(brick_pose.t[0], brick_pose.t[1], brick_pose.t[2] + 0.05)
-            q_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q).q
+            # brick location + 180 degree rotation about x
+            T_hover = brick_pose * SE3(0, 0, 0.25) * SE3.Ry(pi) #CHANGE THIS TO 0,0,0.05)
+            q_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits = True).q
             for q in jtraj(self.robot.q, q_hover, 30).q:
                 self.robot.q = q
                 self.gripper.update()
                 self.env.step(0.02)
-                time.sleep(0.02)
+                time.sleep(0.03)
+
+
+            #print q for each joint
+            print(f"Brick pos: {self.robot.q}")
 
             # 3) Close gripper
             self.gripper.close()
@@ -172,13 +175,15 @@ class Controller:
             self.move_carriage_to_y(wall_pose.t[1])
 
             # 5) Place brick
-            T_place = wall_pose
-            q_place = self.robot.ikine_LM(T_place, q0=self.robot.q).q
+            T_place = wall_pose * SE3(0, 0, 0.23) * SE3.Ry(pi) # change to 0,0, 0.03
+            q_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits = True).q
             for q in jtraj(self.robot.q, q_place, 30).q:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
                 self.env.step(0.02)
-                time.sleep(0.02)
+                time.sleep(0.03)
+
+            print(f"wall pos {self.robot.q}")
 
             # 6) Release
             self.gripper.open()

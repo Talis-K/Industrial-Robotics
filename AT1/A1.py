@@ -161,6 +161,9 @@ class Controller:
                 self.env.step(0.02)
                 time.sleep(0.02)
 
+            #print q for each joint
+            print(self.robot.q)
+
             # 3) Close gripper
             self.gripper.close()
             self.gripper.carrying_idx = i
