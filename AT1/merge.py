@@ -1,6 +1,3 @@
-#avoid coliding with bricks after opalceing and when in transit
-#joint limits for brick positionm
-
 import spatialgeometry as geometry
 import numpy as np
 import swift
@@ -77,7 +74,7 @@ class EnvironmentBuilder:
         # Add environment objects
         self.add_fences_and_ground()
         self.add_rail()
-        self.safetey = self.load_safety()
+        self.safety = self.load_safety()  # Fixed typo
 
         # Add robot
         self.robot = UR3()
@@ -114,18 +111,18 @@ class EnvironmentBuilder:
 
     def load_safety(self):
         current_dir = os.path.dirname(os.path.abspath(__file__))
-        stl_file = ["button.stl", "Fire_extinguisher.stl"]
+        stl_files = ["button.stl", "Fire_extinguisher.stl"]
         safety_positions = [
             SE3(-1.3, -1.4, 0.0)* SE3.Rx(pi/2), SE3(-1, -1.4, 0.0)
         ]
         safety = []
-        for i, (stl_file, pose) in enumerate(zip(stl_file, safety_positions)):
+        for stl_file, pose in zip(stl_files, safety_positions):
             stl_path = os.path.join(current_dir, stl_file)
             if not os.path.exists(stl_path):
                 raise FileNotFoundError(f"STL file not found: {stl_path}")
-            brick = geometry.Mesh(stl_path, pose=pose, scale = (0.001, 0.001, 0.001), color=(0.4, 0, 0, 1))
-            self.env.add(brick)
-            safety.append(brick)
+            safety_obj = geometry.Mesh(stl_path, pose=pose, scale=(0.001, 0.001, 0.001), color=(0.4, 0, 0, 1))
+            self.env.add(safety_obj)
+            safety.append(safety_obj)
         return safety
 
     def load_bricks(self):
@@ -134,7 +131,7 @@ class EnvironmentBuilder:
         if not os.path.exists(stl_path):
             raise FileNotFoundError(f"STL file not found: {stl_path}")
         brick_positions = [
-            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 0.0, 0.0), SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0),
+            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 1.1, 0.0), SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0),
             SE3(-0.3, 0.0, 0.0), SE3(-0.3, 0.2, 0.0), SE3(-0.3, -0.2, 0.0),
             SE3(-0.4, 0.0, 0.0), SE3(-0.4, 0.2, 0.0), SE3(-0.4, -0.2, 0.0)
         ]
@@ -154,8 +151,9 @@ class Controller:
         self.bricks = env_builder.bricks
         self.rail_carriage = env_builder.rail_carriage
         self.gripper = env_builder.gripper
+        self.safety = env_builder.safety
 
-        # Wall target poses
+        # Wall target poses (only 9, so we'll handle the extra brick by skipping)
         self.wall_pose = [
             SE3(0.3, 0.15, 0.0), SE3(0.3, 0.0, 0.0), SE3(0.3, -0.15, 0.0),
             SE3(0.3, 0.15, 0.05), SE3(0.3, 0.0, 0.05), SE3(0.3, -0.15, 0.05),
@@ -166,10 +164,7 @@ class Controller:
         start_y = self.robot.base.t[1]
         for s in np.linspace(0, 1, steps):
             y = (1 - s) * start_y + s * target_y
-            if y > y_max:
-                y = y_max
-            elif y < -y_max:
-                y = -y_max
+            y = np.clip(y, -y_max, y_max)
             self.robot.base = SE3(0, y, 0)
             self.rail_carriage.T = SE3(0, y, 0.025)
             self.gripper.update_with_payload(self.bricks)
@@ -177,20 +172,35 @@ class Controller:
             time.sleep(0.03)
 
     def pick_and_place(self):
-        for i, brick in enumerate(self.bricks):
+        for i in range(len(self.bricks)):
+            if i >= len(self.wall_pose):
+                print(f"No wall pose for brick {i+1}, skipping")
+                continue
+            brick = self.bricks[i]
             brick_pose = SE3(brick.T)
             wall_pose = self.wall_pose[i]
             print(f"Processing brick {i+1}: brick_pose={brick_pose.t}, wall_pose={wall_pose.t}")
+            pick_y = brick_pose.t[1]
 
             # 1) Move base close to brick
-            self.move_carriage_to_y(brick_pose.t[1])
+            self.move_carriage_to_y(pick_y)
 
-            # 2) Approach hover
+            # 2) Check and approach hover
             T_hover = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            q_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits=True).q
-            for q in jtraj(self.robot.q, q_hover, 30).q:
-                self.gripper.update()
+            ik_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits=True)
+            if not ik_hover.success:
+                print(f"Brick {i+1} at {brick_pose.t} is out of reach, skipping")
+                continue
+            q_hover = ik_hover.q
+
+            traj_hover = jtraj(self.robot.q, q_hover, 30).q
+            if not self.check_joint_limits(traj_hover, self.robot):
+                print(f"Trajectory to hover for brick {i+1} violates joint limits, skipping")
+                continue
+
+            for q in traj_hover:
                 self.robot.q = q
+                self.gripper.update()
                 self.env.step(0.02)
                 time.sleep(0.03)
 
@@ -200,20 +210,49 @@ class Controller:
 
             # 4) Lift brick slightly
             T_lift = brick_pose * SE3(0, 0, 0.1) * SE3.Ry(pi)
-            q_lift = self.robot.ikine_LM(T_lift, q0=self.robot.q, joint_limits=True).q
-            for q in jtraj(self.robot.q, q_lift, 15).q:
-                self.gripper.update_with_payload(self.bricks)
+            ik_lift = self.robot.ikine_LM(T_lift, q0=self.robot.q, joint_limits=True)
+            if not ik_lift.success:
+                print(f"Cannot reach lift pose for brick {i+1}, releasing")
+                self.gripper.open()
+                self.gripper.carrying_idx = None
+                continue
+            q_lift = ik_lift.q
+
+            traj_lift = jtraj(self.robot.q, q_lift, 15).q
+            if not self.check_joint_limits(traj_lift, self.robot):
+                print(f"Trajectory to lift for brick {i+1} violates joint limits, releasing")
+                self.gripper.open()
+                self.gripper.carrying_idx = None
+                continue
+
+            for q in traj_lift:
                 self.robot.q = q
+                self.gripper.update_with_payload(self.bricks)
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            # 5) Move base to wall
-            self.move_carriage_to_y(wall_pose.t[1])
+            # 5) Move base to wall (at high lift to avoid collisions)
+            wall_y = wall_pose.t[1]
+            self.move_carriage_to_y(wall_y)
 
             # 6) Place brick
             T_place = wall_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            q_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits=True).q
-            for q in jtraj(self.robot.q, q_place, 30).q:
+            ik_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits=True)
+            if not ik_place.success:
+                print(f"Cannot reach place pose for brick {i+1}, releasing at current position")
+                self.gripper.open()
+                self.gripper.carrying_idx = None
+                continue
+            q_place = ik_place.q
+
+            traj_place = jtraj(self.robot.q, q_place, 30).q
+            if not self.check_joint_limits(traj_place, self.robot):
+                print(f"Trajectory to place for brick {i+1} violates joint limits, releasing at current position")
+                self.gripper.open()
+                self.gripper.carrying_idx = None
+                continue
+
+            for q in traj_place:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
                 self.env.step(0.02)
@@ -223,6 +262,51 @@ class Controller:
             self.gripper.open()
             self.gripper.carrying_idx = None
             print(f"Released brick {i+1}")
+
+            # 8) Retreat to safe height to avoid collisions in future transits
+            T_retreat = SE3(wall_pose.t[0], wall_pose.t[1], 0.2) * SE3.Ry(pi)
+            ik_retreat = self.robot.ikine_LM(T_retreat, q0=self.robot.q, joint_limits=True)
+            if ik_retreat.success:
+                traj_retreat = jtraj(self.robot.q, ik_retreat.q, 15).q
+                if self.check_joint_limits(traj_retreat, self.robot):
+                    for q in traj_retreat:
+                        self.robot.q = q
+                        self.gripper.update()
+                        self.env.step(0.02)
+                        time.sleep(0.03)
+                else:
+                    print(f"Trajectory to retreat for brick {i+1} violates joint limits")
+            else:
+                print(f"Cannot reach retreat pose for brick {i+1}")
+
+    def check_joint_limits(self, Q, robot):
+        """
+        Helper function: check whether each row of Q (joint configs) is within joint limits.
+
+        Parameters:
+        - Q: np.ndarray of shape (N, n)
+        - robot: robot object with .qlim attribute of shape (2, n)
+
+        Prints info about any rows that are invalid.
+        """
+        success = True
+        Q = np.atleast_2d(Q)
+        qlim = robot.qlim  # shape (2, n), where row 0 = lower, row 1 = upper
+
+        for i, q in enumerate(Q):
+            lower_violation = q < qlim[0]
+            upper_violation = q > qlim[1]
+
+            if np.any(lower_violation) or np.any(upper_violation):
+                print(f"q[{i}] is out of joint limits:")
+                for j in range(len(q)):
+                    if lower_violation[j]:
+                        print(f"  Joint {j}: {q[j]:.3f} < lower limit {qlim[0, j]:.3f}")
+                    elif upper_violation[j]:
+                        print(f"  Joint {j}: {q[j]:.3f} > upper limit {qlim[1, j]:.3f}")
+                success = False
+                
+        return success
 
 
 # ---------------- Main ----------------
