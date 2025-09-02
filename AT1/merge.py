@@ -196,12 +196,14 @@ class Controller:
 
             # Hover over brick
             T_pick_hover = brick_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type= "brick hover pose")
             if success == False:
                 continue
-                
+
+            print(f"Moving base to brick {i+1} y or y_max: {brick_y}")    
             self.move_carriage_to_y(brick_y)
 
+            print(f"moving end-effector to brick {i+1} hover: \n{T_pick_hover}")
             for q in traj:
                 self.robot.q = q
                 self.gripper.update()
@@ -210,24 +212,26 @@ class Controller:
 
             # Move down to brick
             T_pick = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick, base_y=brick_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick, base_y=brick_y, pose_type= "brick pose")
             if success == False:
                 continue
-                
+
+            print(f"moving end-effector to brick {i+1} pose: \n{T_pick}")    
             for q in traj:
                 self.robot.q = q
                 self.gripper.update()
                 self.env.step(0.02)
                 time.sleep(0.03)
 
+            print("Closing gripper")
             self.gripper.close()
             self.gripper.carrying_idx = i
 
-            T_pick_lift = brick_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_lift, base_y=brick_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type= "brick hover pose")
             if success == False:
                 continue
-                
+
+            print(f"moving end-effector to brick {i+1} hover: \n{T_pick_hover}")    
             for q in traj:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
@@ -235,11 +239,14 @@ class Controller:
                 time.sleep(0.03)
 
             T_place_hover = wall_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type= "wall hover pose")
             if success == False:
                 continue
-                
+
+            print(f"Moving base to wall {i+1} y or y_max: {wall_y}")    
             self.move_carriage_to_y(wall_y)
+
+            print(f"moving end-effector to Wall {i+1} hover: \n{T_place_hover}")
             for q in traj:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
@@ -247,134 +254,33 @@ class Controller:
                 time.sleep(0.03)
 
             T_place = wall_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place, base_y=wall_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place, base_y=wall_y, pose_type= "wall pose")
             if success == False:
                 continue
-                
+
+            print(f"moving end-effector to wall {i+1} pose: \n{T_place}")    
             for q in traj:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
                 self.env.step(0.02)
                 time.sleep(0.03)
 
+            print("Opening Gripper")
             self.gripper.open()
             self.gripper.carrying_idx = None
 
-            T_place_lift = wall_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_lift, base_y=wall_y)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type= "wall hover pose")
             if success == False:
                 continue
-                
+
+            print(f"moving end-effector to Wall {i+1} hover: \n{T_place_hover}")    
             for q in traj:
                 self.robot.q = q
                 self.gripper.update()
                 self.env.step(0.02)
                 time.sleep(0.03)
 
- 
-            # if not self.check_joint_limits(None, self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type="place_hover"):
-            #     print(f"Wall hover pose for brick {i+1} at {wall_pose.t} is out of reach from base y={wall_y}, skipping")
-            #     continue
-
-            # T_place = wall_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            # if not self.check_joint_limits(None, self.robot, target_pose=T_place, base_y=wall_y, pose_type="place"):
-            #     print(f"Wall pose for brick {i+1} at {wall_pose.t} is out of reach from base y={wall_y}, skipping")
-            #     continue
-
-            # # 1) Move base close to brick
-            # self.move_carriage_to_y(desired_y)
-
-            # # 2) Approach hover
-            # ik_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits=True)
-            # traj_hover = jtraj(self.robot.q, ik_hover.q, 30).q
-            # for q in traj_hover:
-            #     self.robot.q = q
-            #     self.gripper.update()
-            #     self.env.step(0.02)
-            #     time.sleep(0.03)
-
-            # input("Press enter to continue to pick up brick...\n")
-
-            # # 3) Pick brick
-            # T_pick = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            # if not self.check_joint_limits(None, self.robot, target_pose=T_pick, base_y=desired_y):
-            #     print(f"Brick {i+1} at {brick_pose.t} is out of reach from base y={desired_y}, skipping")
-            #     continue
-            # ik_pick = self.robot.ikine_LM(T_pick, q0=self.robot.q, joint_limits=True)
-            # traj_pick = jtraj(self.robot.q, ik_pick.q, 30).q
-            # for q in traj_pick:
-            #     self.robot.q = q
-            #     self.gripper.update()
-            #     self.env.step(0.02)
-            #     time.sleep(0.03)
-           
-            # # 4) Close gripper
-            # self.gripper.close()
-            # self.gripper.carrying_idx = i
-
-            # # 5) Lift brick slightly
-            # T_lift = brick_pose * SE3(0, 0, 1) * SE3.Ry(pi)
-            # if not self.check_joint_limits(None, self.robot, target_pose=T_lift, base_y=desired_y):
-            #     print(f"Brick {i+1} lift pose at {brick_pose.t} is out of reach from base y={desired_y}, skipping")
-            #     self.gripper.open()
-            #     continue
-            # ik_lift = self.robot.ikine_LM(T_lift, q0=self.robot.q, joint_limits=True)
-            # if not ik_lift.success:
-            #     print(f"Cannot reach lift pose for brick {i+1}, releasing")
-            #     self.gripper.open()
-            #     self.gripper.carrying_idx = None
-            #     continue
-            # traj_lift = jtraj(self.robot.q, ik_lift.q, 30).q
-            # if not self.check_joint_limits(traj_lift, self.robot, pose_type="lift"):
-            #     print(f"Trajectory to lift for brick {i+1} violates joint limits, releasing")
-            #     self.gripper.open()
-            #     self.gripper.carrying_idx = None
-            #     continue
-
-            # for q in traj_lift:
-            #     self.robot.q = q
-            #     self.gripper.update_with_payload(self.bricks)
-            #     self.env.step(0.02)
-            #     time.sleep(0.03)
-
-            # input("Press enter to continue to place brick on wall...\n")
-
-            # # 5) Move base to wall (at high lift to avoid collisions)
-            # self.move_carriage_to_y(wall_y)
-
-            # # 6) Place brick
-            # ik_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits=True)
-            # traj_place = jtraj(self.robot.q, ik_place.q, 30).q
-            # for q in traj_place:
-            #     self.robot.q = q
-            #     self.gripper.update_with_payload(self.bricks)
-            #     self.env.step(0.02)
-            #     time.sleep(0.03)
-
-            # input("Press enter to release brick...\n")
-
-            # # 7) Release
-            # self.gripper.open()
-            # self.gripper.carrying_idx = None
-            # print(f"Released brick {i+1}")
-
-            # # 8) Retreat to safe height to avoid collisions in future transits
-            # T_retreat = SE3(wall_pose.t[0], wall_pose.t[1], 0.2) * SE3.Ry(pi)
-            # ik_retreat = self.robot.ikine_LM(T_retreat, q0=self.robot.q, joint_limits=True)
-            # if ik_retreat.success:
-            #     traj_retreat = jtraj(self.robot.q, ik_retreat.q, 15).q
-            #     if self.check_joint_limits(traj_retreat, self.robot, pose_type="retreat"):
-            #         for q in traj_retreat:
-            #             self.robot.q = q
-            #             self.gripper.update()
-            #             self.env.step(0.02)
-            #             time.sleep(0.03)
-            #     else:
-            #         print(f"Trajectory to retreat for brick {i+1} violates joint limits")
-            # else:
-            #     print(f"Cannot reach retreat pose for brick {i+1}")
-
-    def check_and_calculate_joint_angles(self, robot, target_pose=None, base_y=None):
+    def check_and_calculate_joint_angles(self, robot, target_pose=None, base_y=None, pose_type=None):
         success = True
         original_base = robot.base  # Save original base
 
@@ -386,7 +292,7 @@ class Controller:
             traj_result = jtraj(robot.q, ik_result.q, 30).q
             if not ik_result.success:
                 self.failed_bricks += 1
-                print (f"Cannot reach pose at {target_pose.t} from base y={base_y}")
+                print (f"Cannot reach {pose_type} at {target_pose.t} from base y={base_y}")
                 success = False
             robot.base = original_base  # Restore base
             return success, traj_result
