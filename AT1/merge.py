@@ -1,4 +1,5 @@
-#edit brcik ;position to match gripper
+#avoid coliding with bricks after opalceing and when in transit
+#joint limits for brick positionm
 
 import spatialgeometry as geometry
 import numpy as np
@@ -11,33 +12,34 @@ from spatialmath import SE3, SO3
 from spatialgeometry import Cuboid
 from math import pi
 
+y_max = 0.8  # Maximum Y position for the rail carriage
+
 
 # ---------------- Gripper Class ----------------
 class Gripper:
     def __init__(self, env, robot):
         self.env = env
         self.robot = robot
-        self.finger_len = 0.02
+        self.finger_len = 0.05
         self.finger_w = 0.01
-        self.finger_t = 0.08
-        self.ee_to_finger_tip = 0.07
-        self.opening = 0.06
+        self.finger_t = 0.04
+        self.opening = 0.08
         self.carrying_idx = None
 
         # Create finger geometry
-        self.finger_L = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t],
-                               pose=SE3() * SE3.Rz(pi/2), color=[0.2, 0.2, 0.2, 1])
-        self.finger_R = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t],
-                               pose=SE3() * SE3.Rz(pi/2), color=[0.2, 0.2, 0.2, 1])
+        self.finger_L = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
+        self.finger_R = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
+        self.connector = Cuboid(scale=[self.finger_len, self.opening, self.finger_w], color=[0.2, 0.2, 0.2, 1])
         env.add(self.finger_L)
         env.add(self.finger_R)
+        env.add(self.connector)
 
     def open(self):
-        self.opening = 0.06
+        self.opening = 0.08
         self.update()
 
     def close(self):
-        self.opening = 0.0
+        self.opening = 0.06
         self.update()
 
     def update(self):
@@ -45,24 +47,25 @@ class Gripper:
         T_ee = self.robot.fkine(self.robot.q)
 
         # Rotate gripper 180° about X so fingers point downward
-        T_offset = SE3.Rx(pi) * SE3(self.ee_to_finger_tip/2, 0, 0)
+        T_offset = SE3.Rx(pi)  * SE3.Rz(pi/2)
 
         half_gap = self.opening / 2
-        T_fL = T_ee * T_offset * SE3(0,  half_gap + 0.5 * self.finger_w, 0)
-        T_fR = T_ee * T_offset * SE3(0, -half_gap - 0.5 * self.finger_w, 0)
+        T_fL = T_ee * T_offset * SE3(0, half_gap + 0.5 * self.finger_w, -self.finger_t / 2)
+        T_fR = T_ee * T_offset * SE3(0, -half_gap - 0.5 * self.finger_w, -self.finger_t / 2)
+        T_conn = T_ee * T_offset * SE3(0, 0, 0)
 
         self.finger_L.T = T_fL
         self.finger_R.T = T_fR
-
+        self.connector.T = T_conn
 
     def update_with_payload(self, bricks):
         self.update()
         if self.carrying_idx is not None:
             T_ee = self.robot.fkine(self.robot.q)
-            T_offset = SE3.Rx(pi) * SE3(self.ee_to_finger_tip, 0, -0.02)
-            bricks[self.carrying_idx].T = T_ee * T_offset * SE3(0, 0, -0.015)
-
-
+            T_offset = SE3.Rx(pi)
+            # Adjusted brick pose to center it between gripper fingers
+            brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_t)
+            bricks[self.carrying_idx].T = brick_pose
 
 # ---------------- Environment Builder Class ----------------
 class EnvironmentBuilder:
@@ -74,6 +77,7 @@ class EnvironmentBuilder:
         # Add environment objects
         self.add_fences_and_ground()
         self.add_rail()
+        self.safetey = self.load_safety()
 
         # Add robot
         self.robot = UR3()
@@ -86,28 +90,51 @@ class EnvironmentBuilder:
 
         # Add gripper
         self.gripper = Gripper(self.env, self.robot)
+        # Update gripper to set initial position
+        self.gripper.update()
 
         # Add bricks
         self.bricks = self.load_bricks()
 
+        # Refresh environment to show initial state
+        self.env.step(0)
+
     def add_fences_and_ground(self):
-        self.env.add(Cuboid(scale=[3, 0.05, 0.8], pose=SE3(0,  1.5, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
+        self.env.add(Cuboid(scale=[3, 0.05, 0.8], pose=SE3(0, 1.5, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[3, 0.05, 0.8], pose=SE3(0, -1.5, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
-        self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3( 1.5, 0, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
+        self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3(1.5, 0, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3(-1.5, 0, 0.4), color=[0.5, 0.9, 0.5, 0.5]))
-        # self.env.add(Cuboid(scale=[3, 3, 0.01], pose=SE3(), color=[0.8, 0.8, 0.5, 1]))
+        self.env.add(Cuboid(scale=[0.9, 0.04, 0.6], pose=SE3(-1, -1.1, 0.3), color=[0.5, 0.5, 0.9, 0.5]))
 
     def add_rail(self):
-        self.env.add(Cuboid(scale=[0.05, 3, 0.05], pose=SE3(0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
-        self.env.add(Cuboid(scale=[0.05, 3, 0.05], pose=SE3(-0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
-        self.rail_carriage = Cuboid(scale=[0.15, 0.25, 0.05], pose=SE3(0.0, 0.0, 0.025), color=[1, 0.4, 0.7, 1])
+        self.env.add(Cuboid(scale=[0.05, 2*y_max, 0.05], pose=SE3(0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
+        self.env.add(Cuboid(scale=[0.05, 2*y_max, 0.05], pose=SE3(-0.1, 0, 0.025), color=[0.3, 0.3, 0.35, 1]))
+        self.rail_carriage = Cuboid(scale=[0.15, 0.15, 0.05], pose=SE3(0.0, 0.0, 0.025), color=[1, 0.4, 0.7, 1])
         self.env.add(self.rail_carriage)
+
+    def load_safety(self):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        stl_file = ["button.stl", "Fire_extinguisher.stl"]
+        safety_positions = [
+            SE3(-1.3, -1.4, 0.0)* SE3.Rx(pi/2), SE3(-1, -1.4, 0.0)
+        ]
+        safety = []
+        for i, (stl_file, pose) in enumerate(zip(stl_file, safety_positions)):
+            stl_path = os.path.join(current_dir, stl_file)
+            if not os.path.exists(stl_path):
+                raise FileNotFoundError(f"STL file not found: {stl_path}")
+            brick = geometry.Mesh(stl_path, pose=pose, scale = (0.001, 0.001, 0.001), color=(0.4, 0, 0, 1))
+            self.env.add(brick)
+            safety.append(brick)
+        return safety
 
     def load_bricks(self):
         current_dir = os.path.dirname(os.path.abspath(__file__))
         stl_path = os.path.join(current_dir, "Brick.stl")
+        if not os.path.exists(stl_path):
+            raise FileNotFoundError(f"STL file not found: {stl_path}")
         brick_positions = [
-            SE3(-0.2, 0.0, 0.0), SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0),
+            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 0.0, 0.0), SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0),
             SE3(-0.3, 0.0, 0.0), SE3(-0.3, 0.2, 0.0), SE3(-0.3, -0.2, 0.0),
             SE3(-0.4, 0.0, 0.0), SE3(-0.4, 0.2, 0.0), SE3(-0.4, -0.2, 0.0)
         ]
@@ -130,15 +157,19 @@ class Controller:
 
         # Wall target poses
         self.wall_pose = [
-            SE3(0.3, 0.15, 0.00), SE3(0.3, 0.00, 0.00), SE3(0.3, -0.15, 0.00),
-            SE3(0.3, 0.15, 0.05), SE3(0.3, 0.00, 0.05), SE3(0.3, -0.15, 0.05),
-            SE3(0.3, 0.15, 0.10), SE3(0.3, 0.00, 0.10), SE3(0.3, -0.15, 0.10)
+            SE3(0.3, 0.15, 0.0), SE3(0.3, 0.0, 0.0), SE3(0.3, -0.15, 0.0),
+            SE3(0.3, 0.15, 0.05), SE3(0.3, 0.0, 0.05), SE3(0.3, -0.15, 0.05),
+            SE3(0.3, 0.15, 0.10), SE3(0.3, 0.0, 0.10), SE3(0.3, -0.15, 0.10)
         ]
 
     def move_carriage_to_y(self, target_y, steps=25):
         start_y = self.robot.base.t[1]
         for s in np.linspace(0, 1, steps):
             y = (1 - s) * start_y + s * target_y
+            if y > y_max:
+                y = y_max
+            elif y < -y_max:
+                y = -y_max
             self.robot.base = SE3(0, y, 0)
             self.rail_carriage.T = SE3(0, y, 0.025)
             self.gripper.update_with_payload(self.bricks)
@@ -149,45 +180,49 @@ class Controller:
         for i, brick in enumerate(self.bricks):
             brick_pose = SE3(brick.T)
             wall_pose = self.wall_pose[i]
+            print(f"Processing brick {i+1}: brick_pose={brick_pose.t}, wall_pose={wall_pose.t}")
 
             # 1) Move base close to brick
             self.move_carriage_to_y(brick_pose.t[1])
 
             # 2) Approach hover
-            # brick location + 180 degree rotation about x
-            T_hover = brick_pose * SE3(0, 0, 0.25) * SE3.Ry(pi) #CHANGE THIS TO 0,0,0.05)
-            q_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits = True).q
+            T_hover = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
+            q_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits=True).q
             for q in jtraj(self.robot.q, q_hover, 30).q:
-                self.robot.q = q
                 self.gripper.update()
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
-
-
-            #print q for each joint
-            print(f"Brick pos: {self.robot.q}")
 
             # 3) Close gripper
             self.gripper.close()
             self.gripper.carrying_idx = i
 
-            # 4) Move base to wall
+            # 4) Lift brick slightly
+            T_lift = brick_pose * SE3(0, 0, 0.1) * SE3.Ry(pi)
+            q_lift = self.robot.ikine_LM(T_lift, q0=self.robot.q, joint_limits=True).q
+            for q in jtraj(self.robot.q, q_lift, 15).q:
+                self.gripper.update_with_payload(self.bricks)
+                self.robot.q = q
+                self.env.step(0.02)
+                time.sleep(0.03)
+
+            # 5) Move base to wall
             self.move_carriage_to_y(wall_pose.t[1])
 
-            # 5) Place brick
-            T_place = wall_pose * SE3(0, 0, 0.23) * SE3.Ry(pi) # change to 0,0, 0.03
-            q_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits = True).q
+            # 6) Place brick
+            T_place = wall_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
+            q_place = self.robot.ikine_LM(T_place, q0=self.robot.q, joint_limits=True).q
             for q in jtraj(self.robot.q, q_place, 30).q:
                 self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            print(f"wall pos {self.robot.q}")
-
-            # 6) Release
+            # 7) Release
             self.gripper.open()
             self.gripper.carrying_idx = None
+            print(f"Released brick {i+1}")
 
 
 # ---------------- Main ----------------
