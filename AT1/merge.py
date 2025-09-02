@@ -164,7 +164,6 @@ class Controller:
         start_y = self.robot.base.t[1]
         for s in np.linspace(0, 1, steps):
             y = (1 - s) * start_y + s * target_y
-            y = np.clip(y, -y_max, y_max)
             self.robot.base = SE3(0, y, 0)
             self.rail_carriage.T = SE3(0, y, 0.025)
             self.gripper.update_with_payload(self.bricks)
@@ -180,24 +179,35 @@ class Controller:
             brick_pose = SE3(brick.T)
             wall_pose = self.wall_pose[i]
             print(f"Processing brick {i+1}: brick_pose={brick_pose.t}, wall_pose={wall_pose.t}")
-            pick_y = brick_pose.t[1]
 
-            # 1) Move base close to brick
-            self.move_carriage_to_y(pick_y)
+            # Clamp target y to rail limits
+            desired_y = np.clip(brick_pose.t[1], -y_max, y_max)
 
-            # 2) Check and approach hover
+            # Check reachability before moving the rail
+            original_base = self.robot.base  # Save original base
+            self.robot.base = SE3(0, desired_y, 0)  # Set base to desired y-position
+
+            # Check hover pose
             T_hover = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
             ik_hover = self.robot.ikine_LM(T_hover, q0=self.robot.q, joint_limits=True)
             if not ik_hover.success:
-                print(f"Brick {i+1} at {brick_pose.t} is out of reach, skipping")
+                print(f"Brick {i+1} at {brick_pose.t} is out of reach from base y={desired_y}, skipping")
+                self.robot.base = original_base  # Restore base
                 continue
             q_hover = ik_hover.q
 
             traj_hover = jtraj(self.robot.q, q_hover, 30).q
             if not self.check_joint_limits(traj_hover, self.robot):
-                print(f"Trajectory to hover for brick {i+1} violates joint limits, skipping")
+                print(f"Trajectory to hover for brick {i+1} violates joint limits from base y={desired_y}, skipping")
+                self.robot.base = original_base  # Restore base
                 continue
 
+            self.robot.base = original_base  # Restore base before moving
+
+            # 1) Move base close to brick
+            self.move_carriage_to_y(desired_y)
+
+            # 2) Approach hover
             for q in traj_hover:
                 self.robot.q = q
                 self.gripper.update()
@@ -232,7 +242,7 @@ class Controller:
                 time.sleep(0.03)
 
             # 5) Move base to wall (at high lift to avoid collisions)
-            wall_y = wall_pose.t[1]
+            wall_y = np.clip(wall_pose.t[1], -y_max, y_max)
             self.move_carriage_to_y(wall_y)
 
             # 6) Place brick
@@ -278,7 +288,7 @@ class Controller:
                     print(f"Trajectory to retreat for brick {i+1} violates joint limits")
             else:
                 print(f"Cannot reach retreat pose for brick {i+1}")
-
+                
     def check_joint_limits(self, Q, robot):
         """
         Helper function: check whether each row of Q (joint configs) is within joint limits.
