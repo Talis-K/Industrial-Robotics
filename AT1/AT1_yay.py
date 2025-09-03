@@ -4,6 +4,7 @@ import swift
 import time
 import os
 from roboticstoolbox import jtraj, DHLink, DHRobot
+from scipy.spatial import ConvexHull
 from ir_support import UR3
 from spatialmath import SE3, SO3
 from spatialgeometry import Cuboid
@@ -66,10 +67,7 @@ class Gripper:
         half_gap = self.opening / 2
         T_fL = T_ee  * SE3(0, +half_gap + self.q[0],  -self.finger_t / 2)
         T_fR = T_ee  * SE3(0, -half_gap + self.q[1],  -self.finger_t / 2)
-        # print(f"-----------{self.q[0]}")
-        # print(f"-----------{self.q[1]}")
-        # input("swqwe")
-
+ 
         self.finger_L.T = T_fL
         self.finger_R.T = T_fR
         self.connector.T = T_ee
@@ -82,9 +80,6 @@ class Gripper:
             # Adjusted brick pose to center it between gripper fingers, accounting for connector offset
             brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_t + self.q[2])
             bricks[self.carrying_idx].T = brick_pose
-
-# compute metrics
-# max reach raduius
 
 
 # ---------------- Environment Builder Class ----------------
@@ -103,7 +98,9 @@ class EnvironmentBuilder:
 
         # Add robot
         self.robot = UR3()
-        self.robot.q = np.zeros(6)  # Only UR3 joints
+        self.robot.q = np.array([pi/2, -pi/2, 0, -pi/2, 0, -pi/2])  # Only UR3 joints
+        #print end effector pose
+        print(f"Starting end effector pose:\n{self.robot.fkine(self.robot.q)}")
         self.robot.base = SE3(0, 0, 0)
         self.robot.links[1].qlim = np.deg2rad([-160, -20])  # Set joint limits for the second link
         self.robot.links[2].qlim = np.deg2rad([-180, 180])
@@ -328,11 +325,49 @@ class Controller:
             robot.q = original_q  # Restore joint angles
             return success, traj_result
 
+    def compute_reach_and_volume(self, env_builder):
+        y_max = self.env_builder.y_max
+
+        y_max = 0.8
+        max_x_y_q = np.array([pi/2, 0, 0, -pi/2, 0, -pi/2])
+        max_x_z_q = np.array([pi/2, -pi/2, 0, -pi/2, 0, -pi/2])
+        max_y_z_q = np.array([pi/2, 0, 0, -pi/2, pi/2, -pi/2])
+
+        max_distances = {}
+        for y in [-y_max, y_max]:
+            self.robot.base = SE3(0, y, 0)
+            
+            # X-Y plane configuration
+            T_max_x_y = self.robot.fkine(max_x_y_q)
+            x_y_pos = T_max_x_y.t
+            distance_x_y = np.sqrt(x_y_pos[0]**2 + x_y_pos[1]**2)
+            max_distances['x_y'] = max(max_distances.get('x_y', 0), distance_x_y)
+            
+            # X-Z plane configuration
+            T_max_x_z = self.robot.fkine(max_x_z_q)
+            x_z_pos = T_max_x_z.t
+            distance_x_z = np.sqrt(x_z_pos[0]**2 + x_z_pos[2]**2)
+            max_distances['x_z'] = max(max_distances.get('x_z', 0), distance_x_z)
+
+
+            # Y-Z plane configuration
+            T_max_y_z = self.robot.fkine(max_y_z_q)
+            y_z_pos = T_max_y_z.t
+            distance_y_z = np.sqrt(y_z_pos[1]**2 + y_z_pos[2]**2)
+            max_distances['y_z'] = max(max_distances.get('y_z', 0), distance_y_z)
+
+        # Print the maximum distances
+        print(f"Maximum distance from origin (0, 0, 0) in X-Y plane: {max_distances['x_y']:.3f} m")
+        print(f"Maximum distance from origin (0, 0, 0) in X-Z plane: {max_distances['x_z']:.3f} m")
+        print(f"Maximum distance from origin (0, 0, 0) in Y-Z plane: {max_distances['y_z']:.3f} m")
+
+        self.robot.base = SE3(0, 0, 0)                            
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
     env_builder = EnvironmentBuilder()
     controller = Controller(env_builder)
+    controller.compute_reach_and_volume(env_builder)
     input("Press enter to start...\n")
     controller.pick_and_place()
     env_builder.env.hold()
