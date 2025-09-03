@@ -4,9 +4,8 @@ import swift
 import time
 import os
 from roboticstoolbox import jtraj, DHLink, DHRobot
-from scipy.spatial import ConvexHull
 from ir_support import UR3
-from spatialmath import SE3, SO3
+from spatialmath import SE3
 from spatialgeometry import Cuboid
 from math import pi
 
@@ -15,62 +14,55 @@ from math import pi
 class Gripper:
     def __init__(self, env, robot):
         self.env = env
-        self.robot = robot
+        self.robot = robot   # store UR3 reference
         self.finger_len = 0.05
         self.finger_w = 0.01
         self.finger_t = 0.04
-        self.opening = 0.09  # Maximum opening distance (total gap between fingers)
+        self.max_opening = 0.09
+        self.closed = 0.07
         self.carrying_idx = None
-        self.q = np.zeros(3)  # Joint values for left finger, right finger, connector (prismatic d values)
 
-        # Define DH parameters for gripper fingers and connector (prismatic joints)
-        self.finger_L_link = DHLink(
-            d=0,
-            a=0,
-            alpha=0,
-            theta=0,
-            sigma=1,  # Prismatic joint
-            qlim=[0, self.opening / 2]  # Half opening for left finger
-        )
-        self.finger_R_link = DHLink(
-            d=0,
-            a=0,
-            alpha=0,
-            theta=0,
-            sigma=1,  # Prismatic joint
-            qlim=[-self.opening / 2, 0]  # Half opening for right finger (negative direction)
-        )
-        
-        # gripper = DHRobot()
-        
-        # Create visual representations for fingers and connector
-        self.finger_L = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
-        self.finger_R = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
-        self.connector = Cuboid(scale=[self.finger_len, self.opening - 0.01, self.finger_w], color=[0.2, 0.2, 0.2, 1])
+        # Define two prismatic links for the fingers
+        finger_L = DHLink(a=0, alpha=0, d=0, theta=0,
+                          sigma=1, qlim=[0, self.max_opening/2])
+        finger_R = DHLink(a=0, alpha=pi, d=0, theta=0,
+                          sigma=1, qlim=[0, self.max_opening/2])
+
+        # Internal DHRobot model for the fingers
+        self.model = DHRobot([finger_L, finger_R], name="gripper")
+
+        # Graphics
+        self.finger_L = Cuboid([self.finger_len, self.finger_w, self.finger_t], color=[0.2,0.2,0.2,1])
+        self.finger_R = Cuboid([self.finger_len, self.finger_w, self.finger_t], color=[0.2,0.2,0.2,1])
+        self.connector = Cuboid([self.finger_len, self.max_opening - 0.01, self.finger_w], color=[0.2,0.2,0.2,1])
+
         env.add(self.finger_L)
         env.add(self.finger_R)
         env.add(self.connector)
 
+        # Start closed
+        self.q = np.array([self.max_opening/2, -self.max_opening/2])
+
     def open(self):
-        self.opening = 0.09
+        self.q = np.array([self.max_opening/2, -self.max_opening/2])
         self.update()
 
     def close(self):
-        self.opening = 0.07
+        self.q = np.array([self.closed/2, -self.closed/2])
         self.update()
 
     def update(self):
-        # Get end_effector pose
-        T_ee = self.robot.fkine(self.robot.q) * SE3.Rx(pi) * SE3.Rz(pi/2)
+        # Get UR3 tool pose
+        T_base = self.robot.fkine(self.robot.q) * SE3.Rz(pi/2) 
 
-        # Compute finger and connector positions using prismatic joint values
-        half_gap = self.opening / 2
-        T_fL = T_ee  * SE3(0, +half_gap + self.q[0],  -self.finger_t / 2)
-        T_fR = T_ee  * SE3(0, -half_gap + self.q[1],  -self.finger_t / 2)
- 
-        self.finger_L.T = T_fL
-        self.finger_R.T = T_fR
-        self.connector.T = T_ee
+        # Forward kinematics for each finger relative to tool frame
+        T_L = T_base * self.model.fkine([0, self.finger_t/2]) * SE3(0, self.q[0], 0)
+        T_R = T_base * self.model.fkine([0, self.finger_t/2]) * SE3(0, self.q[1], 0)
+
+        # Update meshes
+        self.finger_L.T = T_L
+        self.finger_R.T = T_R
+        self.connector.T = T_base
 
     def update_with_payload(self, bricks):
         self.update()
@@ -78,9 +70,8 @@ class Gripper:
             T_ee = self.robot.fkine(self.robot.q)
             T_offset = SE3.Rx(pi)
             # Adjusted brick pose to center it between gripper fingers, accounting for connector offset
-            brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_t + self.q[2])
+            brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_w - self.finger_t) 
             bricks[self.carrying_idx].T = brick_pose
-
 
 # ---------------- Environment Builder Class ----------------
 class EnvironmentBuilder:
@@ -184,9 +175,9 @@ class Controller:
         self.failed_bricks = 0  # Count of bricks that could not be reached
         # Wall target poses (only 9, so we'll handle the extra brick by skipping)
         self.wall_pose = [
-            SE3(0.3, 0.15, 0.0), SE3(0.3, 0.0, 0.0), SE3(0.3, -0.15, 0.0),
-            SE3(0.3, 0.15, 0.05), SE3(0.3, 0.0, 0.05), SE3(0.3, -0.15, 0.05),
-            SE3(0.3, 0.15, 0.10), SE3(0.3, 0.0, 0.10), SE3(0.3, -0.15, 0.10)
+            SE3(0.3, 0.133, 0.0), SE3(0.3, 0.0, 0.0), SE3(0.3, -0.133, 0.0),
+            SE3(0.3, 0.133, 0.033), SE3(0.3, 0.0, 0.033), SE3(0.3, -0.133, 0.033),
+            SE3(0.3, 0.133, 0.066), SE3(0.3, 0.0, 0.066), SE3(0.3, -0.133, 0.066)
         ]
 
     def move_carriage_to_y(self, target_y, steps=25):
@@ -219,7 +210,7 @@ class Controller:
 
             # Hover over brick, adding offset for additional Z if needed
             additional_z = self.gripper.finger_len  # Adjust Z based on connector offset (since negative offset means lower connector, raise EE)
-            T_pick_hover = brick_pose * SE3(0, 0, 0.2 + additional_z) * SE3.Ry(pi)
+            T_pick_hover = brick_pose * SE3(0, 0, 0.1 + additional_z) * SE3.Ry(pi)
             success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type="brick hover pose")
             if not success:
                 continue
@@ -262,7 +253,7 @@ class Controller:
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            T_place_hover = wall_pose * SE3(0, 0, 0.2 + additional_z) * SE3.Ry(pi)
+            T_place_hover = wall_pose * SE3(0, 0, 0.1 + additional_z) * SE3.Ry(pi)
             success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type="wall hover pose")
             if not success:
                 continue
