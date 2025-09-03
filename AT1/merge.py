@@ -3,7 +3,7 @@ import numpy as np
 import swift
 import time
 import os
-from roboticstoolbox import jtraj
+from roboticstoolbox import jtraj, DHLink, DHRobot
 from ir_support import UR3
 from spatialmath import SE3, SO3
 from spatialgeometry import Cuboid
@@ -18,49 +18,73 @@ class Gripper:
         self.finger_len = 0.05
         self.finger_w = 0.01
         self.finger_t = 0.04
-        self.opening = 0.08
+        self.opening = 0.09  # Maximum opening distance (total gap between fingers)
         self.carrying_idx = None
+        self.q = np.zeros(3)  # Joint values for left finger, right finger, connector (prismatic d values)
 
-        # Create finger geometry
+        # Define DH parameters for gripper fingers and connector (prismatic joints)
+        self.finger_L_link = DHLink(
+            d=0,
+            a=0,
+            alpha=0,
+            theta=0,
+            sigma=1,  # Prismatic joint
+            qlim=[0, self.opening / 2]  # Half opening for left finger
+        )
+        self.finger_R_link = DHLink(
+            d=0,
+            a=0,
+            alpha=0,
+            theta=0,
+            sigma=1,  # Prismatic joint
+            qlim=[-self.opening / 2, 0]  # Half opening for right finger (negative direction)
+        )
+        
+        # gripper = DHRobot()
+        
+        # Create visual representations for fingers and connector
         self.finger_L = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
         self.finger_R = Cuboid(scale=[self.finger_len, self.finger_w, self.finger_t], color=[0.2, 0.2, 0.2, 1])
-        self.connector = Cuboid(scale=[self.finger_len, self.opening, self.finger_w], color=[0.2, 0.2, 0.2, 1])
+        self.connector = Cuboid(scale=[self.finger_len, self.opening - 0.01, self.finger_w], color=[0.2, 0.2, 0.2, 1])
         env.add(self.finger_L)
         env.add(self.finger_R)
         env.add(self.connector)
 
     def open(self):
-        self.opening = 0.08
+        self.opening = 0.09
         self.update()
 
     def close(self):
-        self.opening = 0.06
+        self.opening = 0.07
         self.update()
 
     def update(self):
-        """Update gripper geometry according to robot pose."""
-        T_ee = self.robot.fkine(self.robot.q)
+        # Get end_effector pose
+        T_ee = self.robot.fkine(self.robot.q) * SE3.Rx(pi) * SE3.Rz(pi/2)
 
-        # Rotate gripper 180° about X so fingers point downward
-        T_offset = SE3.Rx(pi) * SE3.Rz(pi/2)
-
+        # Compute finger and connector positions using prismatic joint values
         half_gap = self.opening / 2
-        T_fL = T_ee * T_offset * SE3(0, half_gap + 0.5 * self.finger_w, -self.finger_t / 2)
-        T_fR = T_ee * T_offset * SE3(0, -half_gap - 0.5 * self.finger_w, -self.finger_t / 2)
-        T_conn = T_ee * T_offset * SE3(0, 0, 0)
+        T_fL = T_ee  * SE3(0, +half_gap + self.q[0],  -self.finger_t / 2)
+        T_fR = T_ee  * SE3(0, -half_gap + self.q[1],  -self.finger_t / 2)
+        # print(f"-----------{self.q[0]}")
+        # print(f"-----------{self.q[1]}")
+        # input("swqwe")
 
         self.finger_L.T = T_fL
         self.finger_R.T = T_fR
-        self.connector.T = T_conn
+        self.connector.T = T_ee
 
     def update_with_payload(self, bricks):
         self.update()
         if self.carrying_idx is not None:
             T_ee = self.robot.fkine(self.robot.q)
             T_offset = SE3.Rx(pi)
-            # Adjusted brick pose to center it between gripper fingers
-            brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_t)
+            # Adjusted brick pose to center it between gripper fingers, accounting for connector offset
+            brick_pose = T_ee * T_offset * SE3(0, 0, -self.finger_t + self.q[2])
             bricks[self.carrying_idx].T = brick_pose
+
+# compute metrics
+# max reach raduius
 
 
 # ---------------- Environment Builder Class ----------------
@@ -79,9 +103,11 @@ class EnvironmentBuilder:
 
         # Add robot
         self.robot = UR3()
-        self.robot.q = np.zeros(6)
+        self.robot.q = np.zeros(6)  # Only UR3 joints
         self.robot.base = SE3(0, 0, 0)
-        self.robot.links[1].qlim = np.deg2rad([-180, 0])  # Set joint limits for the second link
+        self.robot.links[1].qlim = np.deg2rad([-160, -20])  # Set joint limits for the second link
+        self.robot.links[2].qlim = np.deg2rad([-180, 180])
+        # self.robot.links[3].qlim = np.deg2rad([0, 90])
         for i in range(self.robot.n):
             print(f"Joint {i} limits: lower = {np.rad2deg(self.robot.qlim[0, i]):.2f}°, upper = {np.rad2deg(self.robot.qlim[1, i]):.2f}°")
         self.robot.add_to_env(self.env)
@@ -102,7 +128,7 @@ class EnvironmentBuilder:
         self.env.add(Cuboid(scale=[3, 0.05, 0.8], pose=SE3(0, -1.5, 0.4 + self.ground_height), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3(1.5, 0, 0.4 + self.ground_height), color=[0.5, 0.9, 0.5, 0.5]))
         self.env.add(Cuboid(scale=[0.05, 3, 0.8], pose=SE3(-1.5, 0, 0.4 + self.ground_height), color=[0.5, 0.9, 0.5, 0.5]))
-        self.env.add(Cuboid(scale=[3, 3, 2*self.ground_height], pose = SE3(0, 0, 0), color=[0.9, 0.9, 0.5, 1])) 
+        self.env.add(Cuboid(scale=[3, 3, 2*self.ground_height], pose=SE3(0, 0, 0), color=[0.9, 0.9, 0.5, 1]))
         self.env.add(Cuboid(scale=[0.9, 0.04, 0.6], pose=SE3(-1, -1.1, 0.3), color=[0.5, 0.5, 0.9, 0.5]))
 
     def add_rail(self):
@@ -117,7 +143,7 @@ class EnvironmentBuilder:
         safety_positions = [
             SE3(-1.3, -1.35, 0.0 + self.ground_height) * SE3.Rx(pi/2), SE3(-1, -1.4, 0.0), SE3(-1.15, -1.48, 0.5) * SE3.Rx(pi/2) * SE3.Ry(pi)
         ]
-        safety_colour = [(0.6, 0.0, 0.0,1.0 ), (0.5, 0.0, 0.0, 1.0), (1.0, 1.0, 0.0, 1.0)]
+        safety_colour = [(0.6, 0.0, 0.0, 1.0), (0.5, 0.0, 0.0, 1.0), (1.0, 1.0, 0.0, 1.0)]
         safety = []
         for stl_file, pose, colour in zip(stl_files, safety_positions, safety_colour):
             stl_path = os.path.join(current_dir, stl_file)
@@ -134,9 +160,10 @@ class EnvironmentBuilder:
         if not os.path.exists(stl_path):
             raise FileNotFoundError(f"STL file not found: {stl_path}")
         brick_positions = [
-            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 1.2, 0.0), SE3(-0.2, 0.0, 0.0), SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0),
-            SE3(-0.3, 0.0, 0.0), SE3(-0.3, 0.2, 0.0), SE3(-0.3, -0.2, 0.0),
-            SE3(-0.4, 0.0, 0.0), SE3(-0.4, 0.2, 0.0), SE3(-0.4, -0.2, 0.0)
+            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 1.2, 0.0), SE3(-0.2, 0.0, 0.0),
+            SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0), SE3(-0.3, 0.0, 0.0),
+            SE3(-0.3, 0.2, 0.0), SE3(-0.3, -0.2, 0.0), SE3(-0.4, 0.0, 0.0),
+            SE3(-0.4, 0.2, 0.0), SE3(-0.4, -0.2, 0.0)
         ]
         bricks = []
         for pose in brick_positions:
@@ -170,56 +197,56 @@ class Controller:
         for s in np.linspace(0, 1, steps):
             y = (1 - s) * start_y + s * target_y
             y = np.clip(y, -self.env_builder.y_max, self.env_builder.y_max)
+            self.gripper.update_with_payload(self.bricks)
             self.robot.base = SE3(0, y, 0)
             self.rail_carriage.T = SE3(0, y, 0.025)
-            self.gripper.update_with_payload(self.bricks)
             self.env.step(0.02)
             time.sleep(0.03)
 
     def pick_and_place(self):
         for i in range(len(self.bricks)):
-
             # Skip if no corresponding wall pose
-            if i-self.failed_bricks >= len(self.wall_pose):
+            if i - self.failed_bricks >= len(self.wall_pose):
                 print(f"No wall pose for brick {i+1}, skipping")
                 continue
 
             # Get brick and wall poses
             brick = self.bricks[i]
             brick_pose = SE3(brick.T)
-            wall_pose = self.wall_pose[i-self.failed_bricks]
+            wall_pose = self.wall_pose[i - self.failed_bricks]
             print(f"Processing brick {i+1}: brick_pose={brick_pose.t}, wall_pose={wall_pose.t}")
 
             # Clamp target y to rail limits
             brick_y = np.clip(brick_pose.t[1], -self.env_builder.y_max, self.env_builder.y_max)
             wall_y = np.clip(wall_pose.t[1], -self.env_builder.y_max, self.env_builder.y_max)
 
-            # Hover over brick
-            T_pick_hover = brick_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type= "brick hover pose")
-            if success == False:
+            # Hover over brick, adding offset for additional Z if needed
+            additional_z = self.gripper.finger_len  # Adjust Z based on connector offset (since negative offset means lower connector, raise EE)
+            T_pick_hover = brick_pose * SE3(0, 0, 0.2 + additional_z) * SE3.Ry(pi)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type="brick hover pose")
+            if not success:
                 continue
 
-            print(f"Moving base to brick {i+1} y or y_max: {brick_y}")    
+            print(f"Moving base to brick {i+1} y or y_max: {brick_y}")
             self.move_carriage_to_y(brick_y)
 
-            print(f"moving end-effector to brick {i+1} hover: \n{T_pick_hover}")
+            print(f"Moving end-effector to brick {i+1} hover: \n{T_pick_hover}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update()
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
             # Move down to brick
-            T_pick = brick_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick, base_y=brick_y, pose_type= "brick pose")
-            if success == False:
+            T_pick = brick_pose * SE3(0, 0, additional_z) * SE3.Ry(pi)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick, base_y=brick_y, pose_type="brick pose")
+            if not success:
                 continue
 
-            print(f"moving end-effector to brick {i+1} pose: \n{T_pick}")    
+            print(f"Moving end-effector to brick {i+1} pose: \n{T_pick}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update()
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
@@ -227,75 +254,80 @@ class Controller:
             self.gripper.close()
             self.gripper.carrying_idx = i
 
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type= "brick hover pose")
-            if success == False:
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_pick_hover, base_y=brick_y, pose_type="brick hover pose")
+            if not success:
                 continue
 
-            print(f"moving end-effector to brick {i+1} hover: \n{T_pick_hover}")    
+            print(f"Moving end-effector to brick {i+1} hover: \n{T_pick_hover}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            T_place_hover = wall_pose * SE3(0, 0, 0.2) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type= "wall hover pose")
-            if success == False:
+            T_place_hover = wall_pose * SE3(0, 0, 0.2 + additional_z) * SE3.Ry(pi)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type="wall hover pose")
+            if not success:
                 continue
 
-            print(f"Moving base to wall {i+1} y or y_max: {wall_y}")    
+            print(f"Moving base to wall {i+1} y or y_max: {wall_y}")
             self.move_carriage_to_y(wall_y)
 
-            print(f"moving end-effector to Wall {i+1} hover: \n{T_place_hover}")
+            print(f"Moving end-effector to wall {i+1} hover: \n{T_place_hover}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            T_place = wall_pose * SE3(0, 0, 0.05) * SE3.Ry(pi)
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place, base_y=wall_y, pose_type= "wall pose")
-            if success == False:
+            T_place = wall_pose * SE3(0, 0, additional_z) * SE3.Ry(pi)
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place, base_y=wall_y, pose_type="wall pose")
+            if not success:
                 continue
 
-            print(f"moving end-effector to wall {i+1} pose: \n{T_place}")    
+            print(f"Moving end-effector to wall {i+1} pose: \n{T_place}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update_with_payload(self.bricks)
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
-            print("Opening Gripper")
+            print("Opening gripper")
             self.gripper.open()
             self.gripper.carrying_idx = None
 
-            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type= "wall hover pose")
-            if success == False:
+            success, traj = self.check_and_calculate_joint_angles(self.robot, target_pose=T_place_hover, base_y=wall_y, pose_type="wall hover pose")
+            if not success:
                 continue
 
-            print(f"moving end-effector to Wall {i+1} hover: \n{T_place_hover}")    
+            print(f"Moving end-effector to wall {i+1} hover: \n{T_place_hover}")
             for q in traj:
-                self.robot.q = q
                 self.gripper.update()
+                self.robot.q = q
                 self.env.step(0.02)
                 time.sleep(0.03)
 
     def check_and_calculate_joint_angles(self, robot, target_pose=None, base_y=None, pose_type=None):
         success = True
         original_base = robot.base  # Save original base
+        original_q = robot.q.copy()  # Save original joint angles
 
         if target_pose is not None and base_y is not None:
             # Set base to desired y-position
             robot.base = SE3(0, base_y, 0)
-            # Check each pose
+            # Compute IK for the end-effector
             ik_result = robot.ikine_LM(target_pose, q0=robot.q, joint_limits=True)
-            traj_result = jtraj(robot.q, ik_result.q, 30).q
             if not ik_result.success:
                 self.failed_bricks += 1
-                print (f"Cannot reach {pose_type} at {target_pose.t} from base y={base_y}")
+                print(f"Cannot reach {pose_type} at {target_pose.t} from base y={base_y}")
                 success = False
+                traj_result = []
+            else:
+                traj_result = jtraj(robot.q, ik_result.q, 30).q
             robot.base = original_base  # Restore base
+            robot.q = original_q  # Restore joint angles
             return success, traj_result
+
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
