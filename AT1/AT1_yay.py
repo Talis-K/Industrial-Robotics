@@ -328,7 +328,6 @@ class Controller:
     def compute_reach_and_volume(self, env_builder):
         y_max = self.env_builder.y_max
 
-        y_max = 0.8
         max_x_y_q = np.array([pi/2, 0, 0, -pi/2, 0, -pi/2])
         max_x_z_q = np.array([pi/2, -pi/2, 0, -pi/2, 0, -pi/2])
         max_y_z_q = np.array([pi/2, 0, 0, -pi/2, pi/2, -pi/2])
@@ -337,31 +336,36 @@ class Controller:
         for y in [-y_max, y_max]:
             self.robot.base = SE3(0, y, 0)
             
-            # X-Y plane configuration
+            # X-Y plane
             T_max_x_y = self.robot.fkine(max_x_y_q)
-            x_y_pos = T_max_x_y.t
-            distance_x_y = np.sqrt(x_y_pos[0]**2 + x_y_pos[1]**2)
-            max_distances['x_y'] = max(max_distances.get('x_y', 0), distance_x_y)
-            
-            # X-Z plane configuration
+            pos_xy = T_max_x_y.t
+            dist_xy = np.sqrt(pos_xy[0]**2 + pos_xy[1]**2)
+            max_distances['x_y'] = max(max_distances.get('x_y', 0), dist_xy)
+
+            # X-Z plane
             T_max_x_z = self.robot.fkine(max_x_z_q)
-            x_z_pos = T_max_x_z.t
-            distance_x_z = np.sqrt(x_z_pos[0]**2 + x_z_pos[2]**2)
-            max_distances['x_z'] = max(max_distances.get('x_z', 0), distance_x_z)
+            pos_xz = T_max_x_z.t
+            dist_xz = np.sqrt(pos_xz[0]**2 + pos_xz[2]**2)
+            max_distances['x_z'] = max(max_distances.get('x_z', 0), dist_xz)
 
-
-            # Y-Z plane configuration
+            # Y-Z plane
             T_max_y_z = self.robot.fkine(max_y_z_q)
-            y_z_pos = T_max_y_z.t
-            distance_y_z = np.sqrt(y_z_pos[1]**2 + y_z_pos[2]**2)
-            max_distances['y_z'] = max(max_distances.get('y_z', 0), distance_y_z)
+            pos_yz = T_max_y_z.t
+            dist_yz = np.sqrt(pos_yz[1]**2 + pos_yz[2]**2)
+            max_distances['y_z'] = max(max_distances.get('y_z', 0), dist_yz)
 
-        # Print the maximum distances
-        print(f"Maximum distance from origin (0, 0, 0) in X-Y plane: {max_distances['x_y']:.3f} m")
-        print(f"Maximum distance from origin (0, 0, 0) in X-Z plane: {max_distances['x_z']:.3f} m")
-        print(f"Maximum distance from origin (0, 0, 0) in Y-Z plane: {max_distances['y_z']:.3f} m")
+        print(f"Max XY reach radius: {max_distances['x_y']:.3f} m")
+        print(f"Max XZ reach radius: {max_distances['x_z']:.3f} m")
+        print(f"Max YZ reach radius: {max_distances['y_z']:.3f} m")
 
-        self.robot.base = SE3(0, 0, 0)                            
+        # ---- Ellipsoid approximation ----
+        r_x_z = max_distances['x_z']      # X reach
+
+        volume = (r_x_z**2) * pi/2 * 2 *y_max
+        print(f"Approximate workspace volume (ellipsoid): {volume:.5f} m³")
+
+        self.robot.base = SE3(0, 0, 0)
+
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
