@@ -41,7 +41,7 @@ class Gripper:
         env.add(self.finger_R)  # Add right finger to environment
         env.add(self.connector)  # Add connector to environment
 
-        # Start closed
+        # Start open
         self.q = np.array([self.max_opening/2, -self.max_opening/2])  # Initial joint positions for fingers
 
     def open(self):
@@ -150,7 +150,7 @@ class EnvironmentBuilder:
         if not os.path.exists(stl_path):
             raise FileNotFoundError(f"STL file not found: {stl_path}")  # Error if file missing
         brick_positions = [
-            SE3(-0.7, -1.2, 0.0), SE3(-0.2, 1.2, 0.0), SE3(-0.2, 0.0, 0.0),
+            SE3(-0.72, -1.2, 0.0), SE3(-0.22, 1.2, -0.2), SE3(-0.22, 0.0, 0.0),
             SE3(-0.2, 0.2, 0.0), SE3(-0.2, -0.2, 0.0), SE3(-0.3, 0.0, 0.0),
             SE3(-0.3, 0.2, 0.0), SE3(-0.3, -0.2, 0.0), SE3(-0.4, 0.0, 0.0),
             SE3(-0.4, 0.2, 0.0), SE3(-0.4, -0.2, 0.0)
