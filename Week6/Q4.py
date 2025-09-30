@@ -1,7 +1,5 @@
 from roboticstoolbox import DHLink, DHRobot
 from math import pi
-import swift
-import ir_support
 
 l1 = DHLink(d=1, a=0, alpha =pi/2, offset=0)
 l2 = DHLink(d=0, a=2, alpha =0, offset=0)

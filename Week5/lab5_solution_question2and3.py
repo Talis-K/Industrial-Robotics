@@ -359,7 +359,7 @@ def is_collision(robot, q_matrix, faces, vertex, face_normals, collisions=[], en
         # Go through each link and also each triangle face
         for i in range(np.size(tr,2)-1):
             for j, face in enumerate(faces):
-                vert_on_plane = vertex[face][0]
+                vert_on_plane = vertex[int(face[0])]
                 intersect_p, check = line_plane_intersection(face_normals[j], 
                                                             vert_on_plane, 
                                                             tr[i][:3,3], 
